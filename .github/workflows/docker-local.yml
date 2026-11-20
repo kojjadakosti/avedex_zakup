@@ -11,6 +11,12 @@ on:
       - "infra/migration/validate-pgservice.mjs"
       - "scripts/restore-sql-safety-preflight.mjs"
       - "scripts/restore-sql-safety-preflight.test.mjs"
+      - "scripts/prepare-restore-dump.mjs"
+      - "scripts/prepare-restore-dump.test.mjs"
+      - "scripts/check-restore-system-copy.mjs"
+      - "scripts/check-restore-system-copy.test.mjs"
+      - "scripts/storage-dump-preflight.mjs"
+      - "scripts/storage-dump-preflight.test.mjs"
       - "infra/supabase/**"
       - "compose.yaml"
       - "Dockerfile"
@@ -33,6 +39,12 @@ on:
       - "infra/migration/validate-pgservice.mjs"
       - "scripts/restore-sql-safety-preflight.mjs"
       - "scripts/restore-sql-safety-preflight.test.mjs"
+      - "scripts/prepare-restore-dump.mjs"
+      - "scripts/prepare-restore-dump.test.mjs"
+      - "scripts/check-restore-system-copy.mjs"
+      - "scripts/check-restore-system-copy.test.mjs"
+      - "scripts/storage-dump-preflight.mjs"
+      - "scripts/storage-dump-preflight.test.mjs"
       - "infra/supabase/**"
       - "compose.yaml"
       - "Dockerfile"
@@ -68,6 +80,10 @@ jobs:
           node --check infra/migration/validate-pgservice.mjs
           node --check scripts/restore-sql-safety-preflight.mjs
           node --test scripts/restore-sql-safety-preflight.test.mjs
+          node --check scripts/prepare-restore-dump.mjs
+          node --check scripts/check-restore-system-copy.mjs
+          node --test scripts/prepare-restore-dump.test.mjs scripts/check-restore-system-copy.test.mjs
+          node scripts/storage-dump-preflight.test.mjs
           bash -n infra/migration/restore-platform-test.sh
           bash -n infra/migration/test-restore-guards.sh
           sudo env GITHUB_ACTIONS=true bash infra/migration/test-restore-guards.sh

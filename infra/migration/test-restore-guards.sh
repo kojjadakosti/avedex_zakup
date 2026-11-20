@@ -83,6 +83,9 @@ printf 'COPY auth.users (id) FROM stdin;\n1\n\\.\nCOPY public.example (notes) FR
 printf "SELECT 'https://old.vercel.app';\n" >> "$temp/dumps/data.sql"
 assert_blocked
 printf 'COPY auth.users (id) FROM stdin;\n1\n\\.\nCOPY public.example (notes) FROM stdin;\nhttps://old.vercel.app/archived\n\\.\n' > "$temp/dumps/data.sql"
+printf 'COPY storage.buckets_vectors (id) FROM stdin;\n\\.\n' >> "$temp/dumps/data.sql"
+assert_blocked
+printf 'COPY auth.users (id) FROM stdin;\n1\n\\.\nCOPY public.example (notes) FROM stdin;\nhttps://old.vercel.app/archived\n\\.\n' > "$temp/dumps/data.sql"
 export PANDA_TARGET_PGSERVICE=invalid/target
 assert_blocked
 export PANDA_TARGET_PGSERVICE=panda_test
