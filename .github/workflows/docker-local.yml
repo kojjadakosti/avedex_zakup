@@ -97,12 +97,8 @@ jobs:
           for (const name of ["panda-web", "panda-proxy", "api-gw", "auth", "rest", "db", "storage"])
             if (!model.services[name]) throw new Error("Missing service: " + name);
           if (model.services["panda-scheduler"]) throw new Error("Scheduler must remain disabled");
-          const tunnel = model.services["panda-db-tunnel"];
-          if (!tunnel?.profiles?.includes("restore") ||
-              tunnel.ports?.length !== 1 ||
-              tunnel.ports[0].host_ip !== "127.0.0.1" ||
-              String(tunnel.ports[0].published) !== "15432")
-            throw new Error("Restore tunnel must be opt-in and loopback-only");
+          if (model.services["panda-db-tunnel"])
+            throw new Error("Restore tunnel must be absent from default Compose");
           const dbCheck = model.services.db.healthcheck?.test?.join(" ") ?? "";
           const poolerNofile = model.services.supavisor?.ulimits?.nofile;
           if (Number(poolerNofile?.soft) !== 100000 || Number(poolerNofile?.hard) !== 100000)
@@ -123,6 +119,19 @@ jobs:
             }
           }
           console.log("PASS: complete local Compose with loopback-only exposure");
+          NODE
+          docker compose -f compose.local.yaml --env-file .env.docker --profile restore \
+            config --format json > "$RUNNER_TEMP/panda-local-restore-compose.json"
+          node - "$RUNNER_TEMP/panda-local-restore-compose.json" <<'NODE'
+          const fs = require("fs");
+          const m = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const tunnel = m.services["panda-db-tunnel"];
+          if (!tunnel?.profiles?.includes("restore") ||
+              tunnel.ports?.length !== 1 ||
+              tunnel.ports[0].host_ip !== "127.0.0.1" ||
+              String(tunnel.ports[0].published) !== "15432")
+            throw new Error("Restore tunnel must be opt-in and loopback-only");
+          console.log("PASS: restore-only profile exposes direct PostgreSQL on loopback");
           NODE
       - name: Boot actual local stack (disposable test data only)
         shell: bash
