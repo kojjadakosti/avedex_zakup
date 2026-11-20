@@ -62,3 +62,6 @@ secrets:
     file: ${PANDA_SECRETS_DIR:?Run bash infra/local/init.sh first}/supabase-secret-key
   cron_secret:
     file: ${PANDA_SECRETS_DIR:?Run bash infra/local/init.sh first}/cron-secret
+
+volumes:
+  panda_next_cache:
