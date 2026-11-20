@@ -112,5 +112,15 @@ jobs:
           trap cleanup EXIT
           timeout 1500s docker compose -f compose.local.yaml --env-file .env.docker up -d --build --wait
           curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/login >/dev/null
-          curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/auth/v1/health >/dev/null
-          echo "PASS: local web, proxy and Supabase Auth respond on the same entrypoint"
+          # The official Supabase gateway rejects anonymous requests without
+          # an API key. Prove the access check is enforced, then use the
+          # generated public test key. Never print secret or service-role keys.
+          status="$(curl --silent --show-error --max-time 15 -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:8080/auth/v1/health)"
+          test "$status" = 401
+          publishable="$(sed -n 's/^NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=//p' .env.docker | tail -1)"
+          test -n "$publishable"
+          curl --fail --silent --show-error --max-time 15 \
+            -H "apikey: $publishable" \
+            http://127.0.0.1:8080/auth/v1/health >/dev/null
+          echo "PASS: local web, proxy and authenticated Supabase gateway respond on the same entrypoint"
