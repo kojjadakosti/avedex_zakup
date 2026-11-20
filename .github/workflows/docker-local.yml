@@ -63,6 +63,7 @@ jobs:
           bash -n infra/local/init.sh
           bash -n infra/local/start.sh
           bash -n infra/local/check-business-schema.sh
+          bash -n infra/local/check-auth-schema.sh
           node --check infra/local/pg-restore-bridge.mjs
           node --check infra/migration/validate-pgservice.mjs
           node --check scripts/restore-sql-safety-preflight.mjs
@@ -120,6 +121,8 @@ jobs:
           for (const name of ["panda-web", "panda-proxy", "api-gw", "auth", "rest", "db", "storage"])
             if (!model.services[name]) throw new Error("Missing service: " + name);
           if (model.services["panda-scheduler"]) throw new Error("Scheduler must remain disabled");
+          if (model.services.auth.image !== "supabase/gotrue:v2.198.0")
+            throw new Error("Auth image must be pinned to schema-compatible v2.198.0");
           if (model.services["panda-db-tunnel"])
             throw new Error("Restore tunnel must be absent from default Compose");
           const dbCheck = model.services.db.healthcheck?.test?.join(" ") ?? "";
@@ -168,6 +171,7 @@ jobs:
           }
           trap cleanup EXIT
           timeout 1500s bash infra/local/start.sh
+          bash infra/local/check-auth-schema.sh
           curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/login >/dev/null
           # The official Supabase gateway rejects anonymous requests without
           # an API key. Prove the access check is enforced, then use the
