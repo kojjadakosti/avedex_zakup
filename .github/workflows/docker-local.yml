@@ -9,6 +9,8 @@ on:
       - "infra/migration/test-restore-guards.sh"
       - "infra/migration/disposable-restore-transaction-smoke.sh"
       - "infra/migration/validate-pgservice.mjs"
+      - "scripts/restore-sql-safety-preflight.mjs"
+      - "scripts/restore-sql-safety-preflight.test.mjs"
       - "infra/supabase/**"
       - "compose.yaml"
       - "Dockerfile"
@@ -29,6 +31,8 @@ on:
       - "infra/migration/test-restore-guards.sh"
       - "infra/migration/disposable-restore-transaction-smoke.sh"
       - "infra/migration/validate-pgservice.mjs"
+      - "scripts/restore-sql-safety-preflight.mjs"
+      - "scripts/restore-sql-safety-preflight.test.mjs"
       - "infra/supabase/**"
       - "compose.yaml"
       - "Dockerfile"
@@ -61,6 +65,8 @@ jobs:
           bash -n infra/local/check-business-schema.sh
           node --check infra/local/pg-restore-bridge.mjs
           node --check infra/migration/validate-pgservice.mjs
+          node --check scripts/restore-sql-safety-preflight.mjs
+          node --test scripts/restore-sql-safety-preflight.test.mjs
           bash -n infra/migration/restore-platform-test.sh
           bash -n infra/migration/test-restore-guards.sh
           sudo env GITHUB_ACTIONS=true bash infra/migration/test-restore-guards.sh
