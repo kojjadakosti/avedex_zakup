@@ -73,6 +73,7 @@ CREATE SCHEMA auth; CREATE TABLE auth.users (id bigint PRIMARY KEY);
 CREATE SCHEMA storage; CREATE TABLE storage.objects (id bigint);
 CREATE SCHEMA vault; CREATE TABLE vault.secrets (id bigint);
 CREATE SCHEMA cron; CREATE TABLE cron.job (id bigint);
+INSERT INTO cron.job(id) VALUES (1);
 SQL
 
 export PANDA_CI_RESTORE_TEMP="$tmp"
@@ -84,8 +85,19 @@ export PANDA_TARGET_DISPOSABLE=CONFIRMED_EMPTY_TEST_DATABASE
 export PANDA_SCHEDULER_DISABLED=YES
 export PANDA_EXPECT_AUTH_USERS=1
 
-# The real SQL engine must abort all role/schema/data changes if postflight
-# expectations do not match. A shell mock would not establish this.
+# Existing cron jobs must block restore before any SQL changes.
+export PANDA_EXPECT_TABLES=2
+cron_status=0
+bash "$root/infra/migration/restore-platform-test.sh" > "$tmp/out" 2>"$tmp/err" || cron_status=$?
+[[ "$cron_status" == 78 ]] || {
+  echo "Nonempty cron jobs must block restore before import" >&2; exit 1;
+}
+docker exec "$db" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  -c "DELETE FROM cron.job;" >/dev/null
+echo "PASS: existing cron jobs block protected restore"
+
+# Empty cron.job is allowed; a wrong postflight count must still roll back
+# all changes. This uses real PostgreSQL, not a mocked SQL engine.
 export PANDA_EXPECT_TABLES=2
 if bash "$root/infra/migration/restore-platform-test.sh" > "$tmp/out" 2>"$tmp/err"; then
   echo "Incorrect table count unexpectedly committed" >&2
@@ -110,6 +122,10 @@ echo "PASS: bad postflight rolled back roles, schema and synthetic user"
 
 # The first SQL failure log is private. Remove it before testing success.
 find "$tmp/dumps" -maxdepth 1 -type f -name '.restore-result.*' -delete
+# Fresh self-hosted Supabase can omit pg_cron entirely. Prove the positive
+# restore succeeds even when cron.job does not exist.
+docker exec "$db" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  -c "DROP TABLE cron.job;" >/dev/null
 export PANDA_EXPECT_TABLES=1
 if ! bash "$root/infra/migration/restore-platform-test.sh" > "$tmp/out" 2>"$tmp/err"; then
   echo "Synthetic approved restore failed" >&2
@@ -120,7 +136,7 @@ state="$(docker exec "$db" psql -U postgres -d postgres -Atq -c "$query")"
 [[ "$state" == "1|1|1" ]] || {
   echo "Accepted SQL import did not contain all synthetic objects" >&2; exit 1;
 }
-echo "PASS: correct postflight committed roles, schema and synthetic user"
+echo "PASS: correct postflight committed roles, schema and synthetic user without cron.job"
 
 # Never overwrite a restored target, even on a second identical invocation.
 status=0
