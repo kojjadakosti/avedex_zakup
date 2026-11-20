@@ -59,7 +59,15 @@ try {
   assert.equal(cronDump.status, 5);
   assert.match(cronDump.stderr, /cron\.job/);
 
-  console.log("PASS: migration guards block stale Storage metadata, encrypted Vault rows, obsolete cron and missing users");
+  const vectorDump = run(
+    'COPY "auth"."users" (id) FROM stdin;\n100\n\\.\n' +
+    'COPY "storage"."buckets_vectors" (id) FROM stdin;\n\\.\n'
+  );
+  assert.equal(vectorDump.status, 6);
+  assert.match(vectorDump.stderr, /vector Storage COPY/);
+  assert.doesNotMatch(vectorDump.stdout + vectorDump.stderr, /100\n/);
+
+  console.log("PASS: migration guards block Storage metadata, empty vector tables, Vault, cron and missing users");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

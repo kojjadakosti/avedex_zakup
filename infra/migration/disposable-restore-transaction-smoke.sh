@@ -50,8 +50,21 @@ cat > "$tmp/dumps/data.sql" <<'SQL'
 COPY auth.users (id) FROM stdin;
 1
 \.
+COPY storage.buckets_vectors (id) FROM stdin;
+\.
+COPY storage.vector_indexes (id) FROM stdin;
+\.
 SQL
 chmod 600 "$tmp/dumps/"*.sql
+
+# Empty vector COPY tables are blocked in raw dumps, then filtered safely.
+if node "$root/scripts/storage-dump-preflight.mjs" "$tmp/dumps/data.sql" >/dev/null 2>&1; then
+  echo "Raw dump with vector COPY must be rejected" >&2; exit 1
+fi
+node "$root/scripts/prepare-restore-dump.mjs" "$tmp/dumps" "$tmp/filtered" >/dev/null
+node "$root/scripts/storage-dump-preflight.mjs" "$tmp/filtered/data.sql" >/dev/null
+[[ "$(stat -c %a "$tmp/filtered/data.sql")" == "600" ]] || exit 1
+
 
 docker run --detach --name "$db" \
   --publish 127.0.0.1:55432:5432 \
@@ -79,7 +92,7 @@ SQL
 export PANDA_CI_RESTORE_TEMP="$tmp"
 export PATH="$tmp/bin:$PATH"
 export PGSERVICEFILE="$tmp/pgservice.conf"
-export PANDA_TEST_DUMP_DIR="$tmp/dumps"
+export PANDA_TEST_DUMP_DIR="$tmp/filtered"
 export PANDA_TARGET_PGSERVICE=panda_test
 export PANDA_TARGET_DISPOSABLE=CONFIRMED_EMPTY_TEST_DATABASE
 export PANDA_SCHEDULER_DISABLED=YES
@@ -110,7 +123,7 @@ state="$(docker exec "$db" psql -U postgres -d postgres -Atq -c "$query")"
 [[ "$state" == "0|0|0" ]] || {
   echo "A rejected SQL import left partially committed data" >&2; exit 1;
 }
-private_failure_log="$(find "$tmp/dumps" -maxdepth 1 -type f -name '.restore-result.*' -print -quit)"
+private_failure_log="$(find "$tmp/filtered" -maxdepth 1 -type f -name '.restore-result.*' -print -quit)"
 [[ -n "$private_failure_log" ]] ||
   { echo "Failed restore did not retain a private SQL error log" >&2; exit 1; }
 if ! grep -q "Protected restore postflight mismatch" "$private_failure_log"; then
@@ -121,7 +134,7 @@ fi
 echo "PASS: bad postflight rolled back roles, schema and synthetic user"
 
 # The first SQL failure log is private. Remove it before testing success.
-find "$tmp/dumps" -maxdepth 1 -type f -name '.restore-result.*' -delete
+find "$tmp/filtered" -maxdepth 1 -type f -name '.restore-result.*' -delete
 # Fresh self-hosted Supabase can omit pg_cron entirely. Prove the positive
 # restore succeeds even when cron.job does not exist.
 docker exec "$db" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
