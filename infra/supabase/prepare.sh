@@ -16,11 +16,17 @@ fi
 
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "$temp_dir"' EXIT
-git clone --filter=blob:none --no-checkout --depth=1 --quiet \
-  --branch "$UPSTREAM_REF" https://github.com/supabase/supabase "$temp_dir/upstream"
-git -C "$temp_dir/upstream" sparse-checkout init --cone
-git -C "$temp_dir/upstream" sparse-checkout set docker
-git -C "$temp_dir/upstream" checkout --quiet
+# Keep the temporary checkout private (mktemp -d is 0700), while
+# checkout files mounted into containers need to be readable by non-root UIDs.
+# Do not relax the umask for generated .env or any credentials.
+(
+  umask 022
+  git clone --filter=blob:none --no-checkout --depth=1 --quiet \
+    --branch "$UPSTREAM_REF" https://github.com/supabase/supabase "$temp_dir/upstream"
+  git -C "$temp_dir/upstream" sparse-checkout init --cone
+  git -C "$temp_dir/upstream" sparse-checkout set docker
+  git -C "$temp_dir/upstream" checkout --quiet
+)
 
 mkdir -p "$DESTINATION"
 cp -a "$temp_dir/upstream/docker/." "$DESTINATION/"

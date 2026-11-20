@@ -1,26 +1,21 @@
-# In local Compose, configure service-role passwords from the
-# pinned upstream roles.sql before any dependent service uses them.
-# The bootstrap is one-shot and must finish successfully.
+# A listening PostgreSQL server is not yet fully initialized.
+# Check role readiness without returning hashes or changing user data.
 services:
+  db:
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 &&
+          test "$$(psql -U postgres -h 127.0.0.1 -d postgres -Atqc
+          "SELECT count(*) FROM pg_authid WHERE rolname IN
+          ('authenticator','pgbouncer','supabase_auth_admin','supabase_functions_admin','supabase_storage_admin')
+          AND rolpassword IS NOT NULL" 2>/dev/null)" = 5
+      interval: 5s
+      timeout: 10s
+      start_period: 90s
+      retries: 12
   auth:
-    depends_on:
-      panda-db-roles:
-        condition: service_completed_successfully
     healthcheck:
       start_period: 60s
       retries: 12
-
-  rest:
-    depends_on:
-      panda-db-roles:
-        condition: service_completed_successfully
-
-  storage:
-    depends_on:
-      panda-db-roles:
-        condition: service_completed_successfully
-
-  realtime:
-    depends_on:
-      panda-db-roles:
-        condition: service_completed_successfully

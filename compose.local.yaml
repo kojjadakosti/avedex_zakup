@@ -11,34 +11,6 @@ include:
     env_file: ./.panda-local/supabase/.env
 
 services:
-  # Official Supabase creates service roles without usable passwords in the
-  # first instant of an included stack boot. Apply its own roles.sql once,
-  # before Auth/REST/Storage attempt password-based connections.
-  panda-db-roles:
-    image: postgres:17-alpine
-    restart: "no"
-    env_file:
-      - ./.panda-local/supabase/.env
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - ./.panda-local/supabase/volumes/db/roles.sql:/etc/panda/roles.sql:ro
-    command:
-      - sh
-      - -ec
-      - |
-        : "$${POSTGRES_PASSWORD:?Missing local Postgres password}"
-        export PGPASSWORD="$$POSTGRES_PASSWORD"
-        psql -h db -U postgres -d postgres -v ON_ERROR_STOP=1 \
-          -f /etc/panda/roles.sql >/dev/null
-    user: "70:70"
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-
   panda-web:
     extends:
       file: compose.yaml
