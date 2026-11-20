@@ -59,7 +59,7 @@ docker run --detach --name "$db" \
   postgres:17-alpine >/dev/null
 ready=no
 for _ in $(seq 1 60); do
-  if docker exec "$db" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+  if docker exec "$db" pg_isready -h 127.0.0.1 -p 5432 -U postgres -d postgres >/dev/null 2>&1; then
     ready=yes
     break
   fi
