@@ -83,7 +83,7 @@ if (sourceObjectsPresent) {
     "not automatically call old Vercel destinations."
   );
   process.exitCode = 5;
- else if (vectorStoragePresent) {
+} else if (vectorStoragePresent) {
   console.error(
     "BLOCKED: data.sql includes vector Storage COPY tables. " +
     "Remove only verified EMPTY blocks using prepare-restore-dump.mjs."

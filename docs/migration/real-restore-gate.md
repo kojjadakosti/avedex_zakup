@@ -67,7 +67,7 @@ sudo env \
   PANDA_TARGET_PGSERVICE=panda_test \
   PANDA_TARGET_DISPOSABLE=CONFIRMED_EMPTY_TEST_DATABASE \
   PANDA_SCHEDULER_DISABLED=YES \
-  PANDA_TEST_DUMP_DIR=/srv/panda/restore-private \
+  PANDA_TEST_DUMP_DIR=/srv/panda/restore-private-filtered \
   PANDA_EXPECT_AUTH_USERS=3 \
   PANDA_EXPECT_TABLES=123 \
   bash /srv/panda/app/infra/migration/restore-platform-test.sh
