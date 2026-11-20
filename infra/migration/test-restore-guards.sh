@@ -12,6 +12,7 @@ chmod 700 "$temp/dumps"
 printf 'SELECT 1;\n' > "$temp/dumps/roles.sql"
 printf 'CREATE TABLE public.example(id integer);\n' > "$temp/dumps/schema.sql"
 printf 'COPY auth.users (id) FROM stdin;\n1\n\\.\n' > "$temp/dumps/data.sql"
+chmod 600 "$temp/dumps/"{roles,schema,data}.sql
 printf '[panda_test]\nhost=127.0.0.1\n' > "$temp/pgservice.conf"
 chmod 600 "$temp/pgservice.conf"
 export PGSERVICEFILE="$temp/pgservice.conf"
@@ -27,9 +28,14 @@ cat > "$temp/bin/psql" <<'MOCK'
 set -e
 printf '%s\n' "psql" >> "$PANDA_TEST_CALL_LOG"
 if [[ "$*" == *"--single-transaction"* ]]; then
+  [[ "$*" == *"pg_advisory_xact_lock"* &&
+     "$*" == *"Protected restore postflight mismatch"* &&
+     "$*" == *"SET session_replication_role = origin"* ]] || exit 43
+  if [[ "${PANDA_TEST_FAIL_RESTORE:-}" == "YES" ]]; then
+    printf 'PRIVATE_MOCK_ERROR_ROW_SHOULD_NEVER_BE_PUBLIC\n' >&2
+    exit 3
+  fi
   touch "$PANDA_TEST_RESTORED"
-elif [[ -f "$PANDA_TEST_RESTORED" ]]; then
-  printf '123|3|0|0\n'
 else
   printf '17|127.0.0.1|0|0|0|0|0\n'
 fi
@@ -54,6 +60,9 @@ assert_blocked() {
 unset PANDA_TARGET_DISPOSABLE
 assert_blocked
 export PANDA_TARGET_DISPOSABLE=CONFIRMED_EMPTY_TEST_DATABASE
+chmod 644 "$temp/dumps/schema.sql"
+assert_blocked
+chmod 600 "$temp/dumps/schema.sql"
 printf 'SELECT cron.schedule(1,2,3);\n' >> "$temp/dumps/schema.sql"
 assert_blocked
 printf 'CREATE TABLE public.example(id integer);\n' > "$temp/dumps/schema.sql"
@@ -62,6 +71,24 @@ assert_blocked
 export PANDA_TARGET_PGSERVICE=panda_test
 
 rm -f "$PANDA_TEST_RESTORED" "$PANDA_TEST_CALL_LOG"
+export PANDA_TEST_FAIL_RESTORE=YES
+status=0
+bash "$repo/infra/migration/restore-platform-test.sh" >"$temp/out" 2>"$temp/err" || status=$?
+[[ "$status" -eq 1 && ! -e "$PANDA_TEST_RESTORED" ]] ||
+  { echo "Failing SQL restore must abort" >&2; exit 1; }
+! grep -q PRIVATE_MOCK_ERROR_ROW_SHOULD_NEVER_BE_PUBLIC "$temp/out" "$temp/err" ||
+  { echo "SQL error details leaked to shared output" >&2; exit 1; }
+private_log="$(find "$temp/dumps" -maxdepth 1 -type f -name '.restore-result.*' -print -quit)"
+[[ -n "$private_log" && "$(stat -c %a "$private_log")" == "600" ]] ||
+  { echo "Protected SQL error log missing" >&2; exit 1; }
+grep -q PRIVATE_MOCK_ERROR_ROW_SHOULD_NEVER_BE_PUBLIC "$private_log" ||
+  { echo "Expected error missing from private SQL log" >&2; exit 1; }
+rm -f "$private_log"
+unset PANDA_TEST_FAIL_RESTORE
+
+rm -f "$PANDA_TEST_RESTORED" "$PANDA_TEST_CALL_LOG"
 bash "$repo/infra/migration/restore-platform-test.sh" >"$temp/out" 2>"$temp/err"
 [[ -f "$PANDA_TEST_RESTORED" ]] || { echo "Safe mocked restore was not invoked" >&2; exit 1; }
-echo "PASS: backup restore refuses unapproved target, cron schedules and invalid connection; valid mock passes"
+[[ -z "$(find "$temp/dumps" -maxdepth 1 -type f -name '.restore-result.*' -print -quit)" ]] ||
+  { echo "Successful restore must not retain temporary SQL logs" >&2; exit 1; }
+echo "PASS: guarded restore checks target, verifies counts before COMMIT and protects SQL errors"

@@ -25,8 +25,12 @@ fi
 [[ "${PANDA_EXPECT_TABLES:-}" =~ ^[1-9][0-9]*$ ]] || die "Source table count required"
 for t in psql node grep stat git; do command -v "$t" >/dev/null || die "Missing $t"; done
 for name in roles schema data; do
-  [[ -s "$PANDA_TEST_DUMP_DIR/$name.sql" && ! -L "$PANDA_TEST_DUMP_DIR/$name.sql" ]] ||
-    die "Missing $name.sql"
+  [[ -s "$PANDA_TEST_DUMP_DIR/$name.sql" && -f "$PANDA_TEST_DUMP_DIR/$name.sql" &&
+     ! -L "$PANDA_TEST_DUMP_DIR/$name.sql" ]] ||
+    die "Missing or unsafe $name.sql"
+  [[ "$(stat -c %u "$PANDA_TEST_DUMP_DIR/$name.sql")" == "0" &&
+     "$(stat -c %a "$PANDA_TEST_DUMP_DIR/$name.sql")" == "600" ]] ||
+    die "Private SQL dumps must be root-owned with mode 0600"
   # Fail closed: never restore dangerous old cloud schedules.
   if grep -Eiq 'vercel[.]app|cron[.]schedule[[:space:]]*\(' "$PANDA_TEST_DUMP_DIR/$name.sql"; then
     die "A dump includes old URLs or cron schedules: $name.sql"
@@ -51,24 +55,72 @@ IFS='|' read -r major host tables users objects secrets cron <<< "$before"
   die "Refusing to modify nonempty/non-local/non-PG17 database"
 echo "CHECK: new private localhost PostgreSQL 17 target is empty"
 
-# Supabase CLI role/schema/data restoration as documented by Supabase.
-# Keep it atomic: failure must not leave partial migrated data.
-psql -X -w -q --single-transaction --set ON_ERROR_STOP=1 \
+# Concurrent runs of this script serialize via a transaction-scoped lock.
+# Recheck the target after BEGIN to close the preflight/write race.
+preflight_sql="$(cat <<'SQL'
+SELECT pg_advisory_xact_lock(7180226, 1);
+DO $panda_preflight$
+BEGIN
+  IF current_setting('server_version_num')::integer/10000 <> 17
+    OR inet_server_addr()::text IS DISTINCT FROM '127.0.0.1'
+    OR current_database() <> 'postgres'
+    OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+               WHERE n.nspname='public' AND c.relkind IN ('r','p'))
+    OR EXISTS (SELECT 1 FROM auth.users)
+    OR EXISTS (SELECT 1 FROM storage.objects)
+    OR EXISTS (SELECT 1 FROM vault.secrets)
+    OR EXISTS (SELECT 1 FROM cron.job) THEN
+    RAISE EXCEPTION 'Protected restore preflight failed within transaction';
+  END IF;
+END
+$panda_preflight$;
+SQL
+)"
+
+# Expectations have already been checked as positive decimal integers.
+# The validation must be part of the same transaction, BEFORE COMMIT.
+postflight_sql="$(cat <<SQL
+DO \$panda_postflight\$
+DECLARE
+  actual_tables bigint;
+  actual_users bigint;
+  actual_objects bigint;
+  actual_cron bigint;
+  actual_vault bigint;
+BEGIN
+  SELECT count(*) INTO actual_tables FROM pg_class c JOIN pg_namespace n
+    ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p');
+  SELECT count(*) INTO actual_users FROM auth.users;
+  SELECT count(*) INTO actual_objects FROM storage.objects;
+  SELECT count(*) INTO actual_cron FROM cron.job;
+  SELECT count(*) INTO actual_vault FROM vault.secrets;
+  IF actual_tables <> ${PANDA_EXPECT_TABLES}
+     OR actual_users <> ${PANDA_EXPECT_AUTH_USERS}
+     OR actual_objects <> 0 OR actual_cron <> 0 OR actual_vault <> 0 THEN
+    RAISE EXCEPTION 'Protected restore postflight mismatch; transaction will roll back';
+  END IF;
+END
+\$panda_postflight\$;
+SQL
+)"
+
+# PostgreSQL errors can include SQL source rows. Keep their diagnostics
+# inside a root-only file rather than emitting sensitive lines in CI output.
+private_log="$(mktemp "$PANDA_TEST_DUMP_DIR/.restore-result.XXXXXXXX")"
+chmod 600 "$private_log"
+if ! psql -X -w -q --single-transaction --set ON_ERROR_STOP=1 \
  --dbname "$conn" \
+ --command "$preflight_sql" \
  --file "$PANDA_TEST_DUMP_DIR/roles.sql" \
  --command 'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;' \
  --file "$PANDA_TEST_DUMP_DIR/schema.sql" \
  --command 'SET session_replication_role = replica;' \
- --file "$PANDA_TEST_DUMP_DIR/data.sql" >/dev/null
-
-after="$(psqltest -c "
-SELECT (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid
- WHERE n.nspname='public' AND c.relkind IN('r','p')),
- (SELECT count(*) FROM auth.users), (SELECT count(*) FROM storage.objects),
- (SELECT count(*) FROM cron.job);")"
-IFS='|' read -r tables users objects cron <<< "$after"
-[[ "$tables" == "$PANDA_EXPECT_TABLES" && "$users" == "$PANDA_EXPECT_AUTH_USERS" &&
- "$objects" == "0" && "$cron" == "0" ]] ||
- die "Restored schema/staff counts mismatch, or old Storage/cron rows present"
-echo "PASS: platform schema and staff restored on protected local test instance"
-echo "STOP: photos, external integration keys and full app testing are still required"
+ --file "$PANDA_TEST_DUMP_DIR/data.sql" \
+ --command 'SET session_replication_role = origin;' \
+ --command "$postflight_sql" >"$private_log" 2>&1; then
+  echo "RESTORE FAILED: transaction rolled back; inspect private root-only log: $private_log" >&2
+  exit 1
+fi
+rm -f -- "$private_log"
+echo "PASS: roles, schema, staff and empty Storage/Vault/cron verified before COMMIT"
+echo "STOP: private files, external integration keys and application parity remain unverified"

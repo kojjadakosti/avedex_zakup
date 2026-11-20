@@ -5,6 +5,8 @@ on:
     paths:
       - "compose.local.yaml"
       - "infra/local/**"
+      - "infra/migration/restore-platform-test.sh"
+      - "infra/migration/test-restore-guards.sh"
       - "infra/supabase/**"
       - "compose.yaml"
       - "Dockerfile"
@@ -21,6 +23,8 @@ on:
     paths:
       - "compose.local.yaml"
       - "infra/local/**"
+      - "infra/migration/restore-platform-test.sh"
+      - "infra/migration/test-restore-guards.sh"
       - "infra/supabase/**"
       - "compose.yaml"
       - "Dockerfile"
@@ -50,6 +54,9 @@ jobs:
         run: |
           bash -n infra/local/init.sh
           bash -n infra/local/check-business-schema.sh
+          bash -n infra/migration/restore-platform-test.sh
+          bash -n infra/migration/test-restore-guards.sh
+          sudo env GITHUB_ACTIONS=true bash infra/migration/test-restore-guards.sh
           node scripts/docker-local-regression.test.cjs
       - name: Prepare disposable configuration
         run: bash infra/local/init.sh
