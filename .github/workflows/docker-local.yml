@@ -39,9 +39,15 @@ jobs:
           node - "$RUNNER_TEMP/panda-local-compose.json" <<'NODE'
           const fs = require("fs");
           const model = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-          for (const name of ["panda-web", "panda-proxy", "api-gw", "auth", "rest", "db", "storage"])
+          for (const name of ["panda-web", "panda-proxy", "panda-db-roles", "api-gw", "auth", "rest", "db", "storage"])
             if (!model.services[name]) throw new Error("Missing service: " + name);
           if (model.services["panda-scheduler"]) throw new Error("Scheduler must remain disabled");
+          const deps = ["auth", "rest", "storage", "realtime"];
+          for (const name of deps) {
+            const condition = model.services[name].depends_on?.["panda-db-roles"]?.condition;
+            if (condition !== "service_completed_successfully")
+              throw new Error(name + ": must wait for database role setup");
+          }
           // Check effective interpolation without printing any real credentials.
           const password = model.services.db.environment.POSTGRES_PASSWORD;
           const authDb = new URL(model.services.auth.environment.GOTRUE_DB_DATABASE_URL);
@@ -63,7 +69,7 @@ jobs:
         run: |
           cleanup() {
             docker compose -f compose.local.yaml --env-file .env.docker ps -a || true
-            docker compose -f compose.local.yaml --env-file .env.docker logs --tail=100 panda-web panda-proxy auth api-gw db || true
+            docker compose -f compose.local.yaml --env-file .env.docker logs --tail=100 panda-web panda-proxy panda-db-roles auth api-gw db || true
             docker compose -f compose.local.yaml --env-file .env.docker down --volumes --remove-orphans || true
             docker network rm panda_shared || true
           }
