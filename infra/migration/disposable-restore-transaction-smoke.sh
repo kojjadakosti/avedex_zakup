@@ -68,6 +68,7 @@ done
 [[ "$ready" == yes ]] || { echo "Disposable PostgreSQL never became ready" >&2; exit 1; }
 
 docker exec -i "$db" psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+CREATE ROLE anon; CREATE ROLE authenticated;
 CREATE SCHEMA auth; CREATE TABLE auth.users (id bigint PRIMARY KEY);
 CREATE SCHEMA storage; CREATE TABLE storage.objects (id bigint);
 CREATE SCHEMA vault; CREATE TABLE vault.secrets (id bigint);
