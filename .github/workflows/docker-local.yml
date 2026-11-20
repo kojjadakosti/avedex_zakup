@@ -58,6 +58,7 @@ jobs:
         run: |
           bash -n infra/local/init.sh
           bash -n infra/local/check-business-schema.sh
+          node --check infra/local/pg-restore-bridge.mjs
           node --check infra/migration/validate-pgservice.mjs
           bash -n infra/migration/restore-platform-test.sh
           bash -n infra/migration/test-restore-guards.sh
@@ -96,6 +97,12 @@ jobs:
           for (const name of ["panda-web", "panda-proxy", "api-gw", "auth", "rest", "db", "storage"])
             if (!model.services[name]) throw new Error("Missing service: " + name);
           if (model.services["panda-scheduler"]) throw new Error("Scheduler must remain disabled");
+          const tunnel = model.services["panda-db-tunnel"];
+          if (!tunnel?.profiles?.includes("restore") ||
+              tunnel.ports?.length !== 1 ||
+              tunnel.ports[0].host_ip !== "127.0.0.1" ||
+              String(tunnel.ports[0].published) !== "15432")
+            throw new Error("Restore tunnel must be opt-in and loopback-only");
           const dbCheck = model.services.db.healthcheck?.test?.join(" ") ?? "";
           const poolerNofile = model.services.supavisor?.ulimits?.nofile;
           if (Number(poolerNofile?.soft) !== 100000 || Number(poolerNofile?.hard) !== 100000)
@@ -124,7 +131,7 @@ jobs:
           cleanup() {
             docker compose -f compose.local.yaml --env-file .env.docker ps -a || true
             docker compose -f compose.local.yaml --env-file .env.docker logs --tail=100 panda-web panda-proxy auth rest storage realtime supavisor api-gw db || true
-            docker compose -f compose.local.yaml --env-file .env.docker down --volumes --remove-orphans || true
+            docker compose -f compose.local.yaml --env-file .env.docker --profile restore down --volumes --remove-orphans || true
             docker network rm panda_shared || true
           }
           trap cleanup EXIT
@@ -142,6 +149,30 @@ jobs:
             -H "apikey: $publishable" \
             http://127.0.0.1:8080/auth/v1/health >/dev/null
           echo "PASS: local web, proxy and authenticated Supabase gateway respond on the same entrypoint"
+
+          # The privileged restore port is absent in normal startup. Start an
+          # explicit, temporary localhost-only tunnel and check actual DB route.
+          if timeout 2 bash -c 'echo > /dev/tcp/127.0.0.1/15432' 2>/dev/null; then
+            echo "Restore port must be closed without the restore profile" >&2
+            exit 1
+          fi
+          docker compose -f compose.local.yaml --env-file .env.docker --profile restore \
+            up -d --no-deps panda-db-tunnel
+          bridge_ready=no
+          for attempt in $(seq 1 15); do
+            if docker run --rm --network host --entrypoint pg_isready postgres:17-alpine \
+              -h 127.0.0.1 -p 15432 -U postgres -d postgres >/dev/null 2>&1; then
+              bridge_ready=yes
+              break
+            fi
+            sleep 2
+          done
+          test "$bridge_ready" = yes || { echo "Restore bridge cannot reach PostgreSQL" >&2; exit 1; }
+          docker compose -f compose.local.yaml --env-file .env.docker --profile restore \
+            stop panda-db-tunnel
+          docker compose -f compose.local.yaml --env-file .env.docker --profile restore \
+            rm -f panda-db-tunnel
+          echo "PASS: direct PostgreSQL restore tunnel is opt-in, local, and removable"
 
           # An empty self-hosted Supabase is infrastructure, not an installed
           # application. Fail closed instead of pretending delta SQL is a baseline.

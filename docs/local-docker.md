@@ -61,3 +61,17 @@ HTTP 200/3xx страницы входа означает только запу�
 ## Защищённый импорт полного baseline
 
 Экспорт Supabase CLI (`roles.sql`, `schema.sql`, `data.sql`) с реальными записями должен оставаться вне GitHub: подготовьте на отдельном сервере root-каталог 0700 и три root-файла 0600. Импорт выполняется отдельно, **не при каждом `docker compose up`**, через `infra/migration/restore-platform-test.sh` по инструкции `docs/migration/real-restore-gate.md` и только после согласования тестовой цели. Внутри одной транзакции проверяется, что цель пустая, и соответствие результата счётчикам источника до COMMIT. Это не заменяет перенос Storage через S3, безопасное повторное создание Vault-секретов и полное тестирование бизнес-сценариев.
+
+### Временный прямой доступ к PostgreSQL для восстановления
+
+Обычная команда `docker compose up` **не запускает** профиль `restore` и не публикует PostgreSQL напрямую. Порт `127.0.0.1:5432` в поставке Supabase относится к Supavisor; **не используйте его для восстановления полного SQL**. На время разрешённого импорта запустите мост:
+
+```bash
+docker compose -f compose.local.yaml --env-file .env.docker --profile restore up -d panda-db-tunnel
+# Далее: защищённый импорт по docs/migration/real-restore-gate.md
+# В закрытом PGSERVICEFILE укажите host=127.0.0.1, port=15432.
+docker compose -f compose.local.yaml --env-file .env.docker --profile restore stop panda-db-tunnel
+docker compose -f compose.local.yaml --env-file .env.docker --profile restore rm -f panda-db-tunnel
+```
+
+Мост только пересылает TCP в контейнер `db:5432`; PostgreSQL по-прежнему проверяет пароль. Храните `PGSERVICEFILE` и `passfile` вне репозитория с правами 0600. Не оставляйте этот профиль включённым после импорта, не открывайте его порт в LAN и не используйте `down -v` ради остановки моста.

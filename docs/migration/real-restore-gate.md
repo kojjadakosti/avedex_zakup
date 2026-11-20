@@ -45,7 +45,7 @@ sudo env \
   bash /srv/panda/app/infra/migration/copy-verify-private-storage.sh
 ```
 
-Примерные числа выше нужно заменить на свежие показатели источника. В `/root/.pg_service.conf` должно быть отдельное соединение `[panda_test]` с полями `host=127.0.0.1`, `port=5432` (либо фактический локально опубликованный порт), `dbname=postgres`, `user=supabase_admin`, `passfile=/root/.pgpass`. Оба файла должны принадлежать root и иметь режим 0600. Прямое указание `hostaddr`, удалённого адреса и libpq-переменных, переопределяющих цель, запрещено. При Docker NAT сервер внутри контейнера видит свой внутренний адрес: безопасный **клиентский** адрес проверяется по `PGSERVICEFILE`, а не по `inet_server_addr()`. Никаких паролей в аргументах команд.
+Примерные числа выше нужно заменить на свежие показатели источника. В `/root/.pg_service.conf` должно быть отдельное соединение `[panda_test]` с полями `host=127.0.0.1`, `port=15432` (временный прямой туннель профиля `restore`), `dbname=postgres`, `user=supabase_admin`, `passfile=/root/.pgpass`. Оба файла должны принадлежать root и иметь режим 0600. Прямое указание `hostaddr`, удалённого адреса и libpq-переменных, переопределяющих цель, запрещено. При Docker NAT сервер внутри контейнера видит свой внутренний адрес: безопасный **клиентский** адрес проверяется по `PGSERVICEFILE`, а не по `inet_server_addr()`. Никаких паролей в аргументах команд.
 
 ## Защитные ограничения
 
@@ -62,3 +62,5 @@ sudo env \
 - https://supabase.com/docs/guides/self-hosting/restore-from-platform
 - https://supabase.com/docs/guides/self-hosting/copy-from-platform-s3
 - https://rclone.org/commands/rclone_check/
+
+**Для `compose.local.yaml`:** сначала выполните `docker compose -f compose.local.yaml --env-file .env.docker --profile restore up -d panda-db-tunnel` из корня приложения, а после окончания импорта — `stop panda-db-tunnel` и `rm -f panda-db-tunnel` с теми же параметрами Compose. Порт 5432 на хосте предназначен для Supavisor, не для этого SQL-импорта. Туннель слушает только `127.0.0.1:15432` и не включён в обычный запуск.

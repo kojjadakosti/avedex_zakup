@@ -11,6 +11,29 @@ include:
     env_file: ./.panda-local/supabase/.env
 
 services:
+  # Ephemeral direct PostgreSQL forwarding for a protected manual restore.
+  # Off in default 'up'; never expose this port beyond loopback.
+  panda-db-tunnel:
+    profiles: ["restore"]
+    image: node:24-bookworm-slim
+    command: ["node", "/opt/panda/pg-restore-bridge.mjs"]
+    user: "1000:1000"
+    read_only: true
+    restart: "no"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./infra/local/pg-restore-bridge.mjs:/opt/panda/pg-restore-bridge.mjs:ro
+    networks:
+      - default
+    ports:
+      - "127.0.0.1:15432:15432"
+    depends_on:
+      db:
+        condition: service_healthy
+
   panda-web:
     extends:
       file: compose.yaml
