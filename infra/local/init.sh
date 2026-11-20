@@ -58,9 +58,13 @@ openssl rand -hex 32 > "$SECRETS/cron-secret"
 # Compose file-based secrets keep host ownership and permissions (no UID remap).
 # The Next.js runtime runs as UID/GID 1000; grant it read-only access.
 if [[ "$(id -u)" != 1000 ]]; then
-  chgrp 1000 "$SECRETS" "$SECRETS/supabase-secret-key" "$SECRETS/cron-secret" || {
-    echo "Unable to grant container GID 1000 access to secret files" >&2; exit 1;
+  command -v sudo >/dev/null || {
+    echo "Container secrets require UID 1000 or sudo access to grant GID 1000" >&2; exit 1;
   }
+  sudo -n chgrp 1000 "$ROOT/.panda-local" "$SECRETS" "$SECRETS/supabase-secret-key" "$SECRETS/cron-secret" || {
+    echo "Unable to grant container GID 1000 access to secret paths" >&2; exit 1;
+  }
+  chmod 750 "$ROOT/.panda-local"
 fi
 chmod 640 "$SECRETS/"*
 cat > "$ROOT/.env.docker" <<EOF
