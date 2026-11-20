@@ -17,7 +17,8 @@ assert.match(compose, /supabase_secret_key:/);
 assert.doesNotMatch(compose, /panda-scheduler:/);
 assert.match(config, /reverse_proxy supabase-gateway:8000/);
 assert.match(config, /reverse_proxy panda-web:3000/);
-assert.doesNotMatch(config, /reverse_proxy supabase-gateway:8000\s*\n\s*}/m); // route must be scoped
+assert.match(config, /@supabase path \/auth\/v1/);
+assert.match(config, /handle @supabase/);
 assert.match(init, /DISABLE_SIGNUP=true/);
 assert.match(init, /docker network create panda_shared/);
 assert.match(init, /Existing local state found; refusing to overwrite/);
