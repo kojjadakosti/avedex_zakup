@@ -1,0 +1,64 @@
+# Local single-project entrypoint. Run infra/local/init.sh once before first use.
+# Upstream Supabase is pinned by infra/supabase/prepare.sh and lives outside Git.
+name: panda-local
+
+include:
+  - path:
+      - ./.panda-local/supabase/docker-compose.yml
+      - ./infra/supabase/docker-compose.panda.yml
+    project_directory: ./.panda-local/supabase
+    env_file: ./.panda-local/supabase/.env
+
+services:
+  panda-web:
+    extends:
+      file: compose.yaml
+      service: panda-web
+    networks:
+      - panda_shared
+    ports: !override []
+    environment:
+      SUPABASE_INTERNAL_URL: http://supabase-gateway:8000
+      SUPABASE_URL: http://supabase-gateway:8000
+      SUPABASE_SECRET_KEY_FILE: /run/secrets/supabase_secret_key
+      CRON_SECRET_FILE: /run/secrets/cron_secret
+    secrets:
+      - supabase_secret_key
+      - cron_secret
+    depends_on:
+      api-gw:
+        condition: service_healthy
+
+  panda-proxy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "${PANDA_BIND_ADDRESS:-127.0.0.1}:${PANDA_HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./infra/local/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - panda_shared
+    depends_on:
+      panda-web:
+        condition: service_healthy
+      api-gw:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /data
+      - /config
+
+networks:
+  panda_shared:
+    name: panda_shared
+    external: true
+
+secrets:
+  supabase_secret_key:
+    file: ${PANDA_SECRETS_DIR:?Run bash infra/local/init.sh first}/supabase-secret-key
+  cron_secret:
+    file: ${PANDA_SECRETS_DIR:?Run bash infra/local/init.sh first}/cron-secret

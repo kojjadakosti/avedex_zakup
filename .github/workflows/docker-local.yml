@@ -1,0 +1,52 @@
+name: Panda local Docker configuration
+
+on:
+  pull_request:
+    paths:
+      - "compose.local.yaml"
+      - "infra/local/**"
+      - "scripts/docker-local-regression.test.cjs"
+      - ".github/workflows/docker-local.yml"
+  push:
+    branches:
+      - infra/local-stack
+    paths:
+      - "compose.local.yaml"
+      - "infra/local/**"
+      - "scripts/docker-local-regression.test.cjs"
+      - ".github/workflows/docker-local.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-compose-config:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static checks
+        run: |
+          bash -n infra/local/init.sh
+          node scripts/docker-local-regression.test.cjs
+      - name: Prepare disposable configuration
+        run: bash infra/local/init.sh
+      - name: Validate complete Compose model
+        run: |
+          docker compose -f compose.local.yaml --env-file .env.docker config --quiet
+          docker compose -f compose.local.yaml --env-file .env.docker config --format json > "$RUNNER_TEMP/panda-local-compose.json"
+          node - "$RUNNER_TEMP/panda-local-compose.json" <<'NODE'
+          const fs = require("fs");
+          const model = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          for (const name of ["panda-web", "panda-proxy", "api-gw", "auth", "rest", "db", "storage"])
+            if (!model.services[name]) throw new Error("Missing service: " + name);
+          if (model.services["panda-scheduler"]) throw new Error("Scheduler must remain disabled");
+          for (const [name, service] of Object.entries(model.services)) {
+            for (const port of service.ports ?? []) {
+              if (port.host_ip !== "127.0.0.1")
+                throw new Error("Public port in " + name);
+            }
+          }
+          console.log("PASS: complete local Compose with loopback-only exposure");
+          NODE

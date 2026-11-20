@@ -1,0 +1,45 @@
+# Локальный Docker: единый запуск ПАНДЫ
+
+Это **отдельная локальная конфигурация**, не замена действующему Vercel/Supabase и не автоматическая миграция данных. Используется официальный self-hosted Supabase, закреплённый в `infra/supabase/prepare.sh`, Next.js и локальный Caddy-прокси.
+
+## Требования и первая инициализация
+
+Linux с Docker Engine, Docker Compose **2.24.4+**, Git, OpenSSL, Bash и свободным местом для образов/БД. Для генерации новых Auth-ключей нужен Node.js >=16 на хосте **либо** доступный Docker daemon. Команды из корня проекта:
+
+```bash
+bash infra/local/init.sh
+docker compose -f compose.local.yaml --env-file .env.docker up -d --build
+docker compose -f compose.local.yaml --env-file .env.docker ps
+```
+
+Страница входа: http://localhost:8080/login. Запросы браузера к `/auth/v1`, `/rest/v1`, `/storage/v1`, `/realtime/v1` и `/functions/v1` проксируются внутри Docker; Supabase Studio наружу не публикуется. Прямые порты Supabase и Next.js остаются на loopback. Scheduler **не запускается**: запускать задания на свежей или тестовой базе нельзя.
+
+`init.sh` запускается **один раз** и отказывает в перезаписи существующих `.env.docker`, `.panda-local/supabase` или `.panda-local/secrets`. Он получает официальные файлы Supabase, создаёт новые ключи и закрытые конфигурационные файлы, выключает открытую регистрацию и подключает общую сеть `panda_shared`. Изменения секретов нельзя делать повторным запуском инициализатора, иначе существующие сессии и зашифрованные данные могут стать недоступными.
+
+## Важно: пустой Supabase ≠ рабочие бизнес-данные
+
+Первый запуск создаёт **инфраструктуру**, но не может из воздуха создать существующую бизнес-схему, пользователей и фотографии. Исходные SQL-миграции в `supabase/migrations` инкрементальные и не являются подтверждённым полным baseline. До авторизации и проверки бизнес-модулей необходима отдельная защищённая процедура восстановления baseline/данных по `docs/migration/real-restore-gate.md`. Не направляйте тестовые задачи на производственные API и не включайте планировщик до cutover. Запуск `docker compose up` **не** восстанавливает и не удаляет БД.
+
+## Повторные действия
+
+```bash
+docker compose -f compose.local.yaml --env-file .env.docker up -d --build
+docker compose -f compose.local.yaml --env-file .env.docker logs -f panda-web
+docker compose -f compose.local.yaml --env-file .env.docker down
+```
+
+**Не применяйте `down -v` или `reset.sh` к данным, которые нужно сохранить.** Образы обновляются через сборку, данные PostgreSQL/Storage находятся в игнорируемом каталоге `.panda-local/supabase/volumes`, служебные Docker volumes и ключи — отдельно. Существующие файлы `.panda-local` и `.env.docker` никогда не коммитятся.
+
+## Доступ с другого компьютера
+
+По умолчанию HTTP открыт только на `127.0.0.1:8080`; это безопасно для тестов через SSH-туннель. Для сервера в LAN/интернете не открывайте без TLS адрес `0.0.0.0:8080` с авторизацией и токенами. Настройте HTTPS reverse-proxy на сервере и укажите при **первой** инициализации `PANDA_PUBLIC_ORIGIN=https://имя-домена`. Публичный URL встраивается в образ Next.js при сборке, а Supabase Auth использует его для обратных ссылок; изменение адреса после инициализации требует согласованного редактирования обоих env-файлов и пересборки. Прокси должен направлять эти же разрешённые пути к локальному Caddy, не открывая Studio и порты БД.
+
+## Проверка после запуска
+
+```bash
+docker compose -f compose.local.yaml --env-file .env.docker config --quiet
+docker compose -f compose.local.yaml --env-file .env.docker ps
+curl -fsSI http://127.0.0.1:8080/login
+```
+
+HTTP 200/3xx страницы входа означает только запуск Next.js и прокси, **не** проверку Auth, RLS, Storage, Vault, миграции, фоновых задач или восстановления данных. Для настоящего переноса следуйте отдельным сценариям и контрольным спискам в `docs/migration/`.

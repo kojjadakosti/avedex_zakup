@@ -1,0 +1,25 @@
+"use strict";
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const read = name => fs.readFileSync(path.join(__dirname, "..", name), "utf8");
+const compose = read("compose.local.yaml");
+const config = read("infra/local/Caddyfile");
+const init = read("infra/local/init.sh");
+assert.match(compose, /include:/);
+assert.match(compose, /docker-compose\.panda\.yml/);
+assert.match(compose, /project_directory:/);
+assert.match(compose, /panda-web:/);
+assert.match(compose, /panda-proxy:/);
+assert.match(compose, /ports: !override \[\]/);
+assert.match(compose, /SUPABASE_INTERNAL_URL: http:\/\/supabase-gateway:8000/);
+assert.match(compose, /supabase_secret_key:/);
+assert.doesNotMatch(compose, /panda-scheduler:/);
+assert.match(config, /reverse_proxy supabase-gateway:8000/);
+assert.match(config, /reverse_proxy panda-web:3000/);
+assert.doesNotMatch(config, /reverse_proxy supabase-gateway:8000\s*\n\s*}/m); // route must be scoped
+assert.match(init, /DISABLE_SIGNUP=true/);
+assert.match(init, /docker network create panda_shared/);
+assert.match(init, /Existing local state found; refusing to overwrite/);
+assert.match(init, /chmod 600/);
+console.log("PASS: local stack has restricted proxy, closed secrets and no enabled scheduler");
