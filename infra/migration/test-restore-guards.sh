@@ -11,7 +11,7 @@ mkdir -p "$temp/bin" "$temp/dumps"
 chmod 700 "$temp/dumps"
 printf 'SELECT 1;\n' > "$temp/dumps/roles.sql"
 printf 'CREATE TABLE public.example(id integer);\n' > "$temp/dumps/schema.sql"
-printf 'COPY auth.users (id) FROM stdin;\n1\n\\.\n' > "$temp/dumps/data.sql"
+printf 'COPY auth.users (id) FROM stdin;\n1\n\\.\nCOPY public.example (notes) FROM stdin;\nhttps://old.vercel.app/archived\n\\.\n' > "$temp/dumps/data.sql"
 chmod 600 "$temp/dumps/"{roles,schema,data}.sql
 cat > "$temp/pgservice.conf" <<SERVICE
 [panda_test]
@@ -77,6 +77,12 @@ chmod 600 "$temp/dumps/schema.sql"
 printf 'SELECT cron.schedule(1,2,3);\n' >> "$temp/dumps/schema.sql"
 assert_blocked
 printf 'CREATE TABLE public.example(id integer);\n' > "$temp/dumps/schema.sql"
+printf 'SELECT cron.schedule(1,2,3);\n' >> "$temp/dumps/data.sql"
+assert_blocked
+printf 'COPY auth.users (id) FROM stdin;\n1\n\\.\nCOPY public.example (notes) FROM stdin;\nhttps://old.vercel.app/archived\n\\.\n' > "$temp/dumps/data.sql"
+printf "SELECT 'https://old.vercel.app';\n" >> "$temp/dumps/data.sql"
+assert_blocked
+printf 'COPY auth.users (id) FROM stdin;\n1\n\\.\nCOPY public.example (notes) FROM stdin;\nhttps://old.vercel.app/archived\n\\.\n' > "$temp/dumps/data.sql"
 export PANDA_TARGET_PGSERVICE=invalid/target
 assert_blocked
 export PANDA_TARGET_PGSERVICE=panda_test

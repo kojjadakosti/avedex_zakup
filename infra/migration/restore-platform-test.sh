@@ -31,12 +31,15 @@ for name in roles schema data; do
   [[ "$(stat -c %u "$PANDA_TEST_DUMP_DIR/$name.sql")" == "0" &&
      "$(stat -c %a "$PANDA_TEST_DUMP_DIR/$name.sql")" == "600" ]] ||
     die "Private SQL dumps must be root-owned with mode 0600"
-  # Fail closed: never restore dangerous old cloud schedules.
-  if grep -Eiq 'vercel[.]app|cron[.]schedule[[:space:]]*\(' "$PANDA_TEST_DUMP_DIR/$name.sql"; then
-    die "A dump includes old URLs or cron schedules: $name.sql"
-  fi
 done
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+# SQL outside COPY is executable, but historical URLs inside COPY are data.
+# Fail closed on malformed COPY framing or obsolete runnable SQL.
+for name in roles schema data; do
+  node "$repo_dir/scripts/restore-sql-safety-preflight.mjs" "$name" \
+    "$PANDA_TEST_DUMP_DIR/$name.sql" >/dev/null ||
+    die "Unsafe or malformed SQL dump: $name.sql"
+done
 node "$repo_dir/infra/migration/validate-pgservice.mjs" \
   "$PGSERVICEFILE" "$PANDA_TARGET_PGSERVICE" >/dev/null ||
   die "Privileged PostgreSQL connection is not safely restricted to localhost"
