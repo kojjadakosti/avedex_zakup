@@ -6,6 +6,7 @@ include:
   - path:
       - ./.panda-local/supabase/docker-compose.yml
       - ./infra/supabase/docker-compose.panda.yml
+      - ./infra/supabase/docker-compose.local.yml
     project_directory: ./.panda-local/supabase
     env_file: ./.panda-local/supabase/.env
 

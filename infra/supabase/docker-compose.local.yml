@@ -1,0 +1,7 @@
+# Local cold-start grace period for GoTrue, whose first boot migrates Auth schema.
+# Keep upstream's actual readiness probe; never bypass it.
+services:
+  auth:
+    healthcheck:
+      start_period: 60s
+      retries: 12
