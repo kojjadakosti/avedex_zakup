@@ -27,7 +27,9 @@ const state=JSON.parse(await readFile(statePath,"utf8"));
 assert.match(state.userId,/^[0-9a-f-]{36}$/i);
 assert.match(state.email,/^panda-ci-/);
 assert.match(state.objectPath,/^panda-ci-[a-f0-9]+\/smoke\/photo\.png$/);
-const base="http://127.0.0.1:8000";
+const base=process.env.PANDA_SMOKE_ORIGIN || "http://127.0.0.1:8000";
+assert.ok(["http://127.0.0.1:8000","http://127.0.0.1:8080"].includes(base),
+  "Synthetic persistence smoke may use only the isolated loopback gateway");
 const abort=()=>AbortSignal.timeout(15000);
 
 async function getJson(path,{method="GET",body,token,key=publicKey}={}){

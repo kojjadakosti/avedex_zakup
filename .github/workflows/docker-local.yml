@@ -49,6 +49,7 @@ jobs:
       - name: Static checks
         run: |
           bash -n infra/local/init.sh
+          bash -n infra/local/check-business-schema.sh
           node scripts/docker-local-regression.test.cjs
       - name: Prepare disposable configuration
         run: bash infra/local/init.sh
@@ -124,3 +125,33 @@ jobs:
             -H "apikey: $publishable" \
             http://127.0.0.1:8080/auth/v1/health >/dev/null
           echo "PASS: local web, proxy and authenticated Supabase gateway respond on the same entrypoint"
+
+          # An empty self-hosted Supabase is infrastructure, not an installed
+          # application. Fail closed instead of pretending delta SQL is a baseline.
+          set +e
+          bash infra/local/check-business-schema.sh > "$RUNNER_TEMP/panda-schema-gate.txt" 2>&1
+          schema_status=$?
+          set -e
+          if [[ "$schema_status" -ne 78 ]] ||
+             ! grep -q '^BLOCKED: Business schema is absent' "$RUNNER_TEMP/panda-schema-gate.txt"; then
+            echo "Fresh local database must fail the business-schema gate" >&2
+            exit 1
+          fi
+          echo "PASS: fresh database is not mistaken for restored business schema"
+
+          # Synthetic Auth user + private Storage photo exercise the same
+          # public reverse-proxy routes used by browsers, including RLS/key gates.
+          fixture="$RUNNER_TEMP/panda-local-persistence.json"
+          PANDA_SMOKE_ORIGIN=http://127.0.0.1:8080 \
+            node infra/migration/supabase-stack-smoke.mjs .panda-local/supabase/.env "$fixture"
+          test "$(stat -c '%a' "$fixture")" = 600
+
+          # Restart WITHOUT down -v. Verify Auth user and private object bytes
+          # survive across the combined Compose stack, not just DB-only tests.
+          docker compose -f compose.local.yaml --env-file .env.docker stop
+          timeout 600s docker compose -f compose.local.yaml --env-file .env.docker up -d --wait
+          PANDA_SMOKE_ORIGIN=http://127.0.0.1:8080 \
+            node infra/migration/supabase-persistence-smoke.mjs .panda-local/supabase/.env "$fixture"
+          curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/login >/dev/null
+          rm -f "$fixture"
+          echo "PASS: local Compose restart retains Auth and private Storage data, web remains healthy"
