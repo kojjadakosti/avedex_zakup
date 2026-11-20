@@ -5,14 +5,30 @@ on:
     paths:
       - "compose.local.yaml"
       - "infra/local/**"
+      - "infra/supabase/**"
+      - "compose.yaml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "infra/docker/entrypoint.mjs"
+      - "next.config.ts"
+      - "package.json"
+      - "package-lock.json"
       - "scripts/docker-local-regression.test.cjs"
       - ".github/workflows/docker-local.yml"
   push:
     branches:
-      - infra/local-stack
+      - master
     paths:
       - "compose.local.yaml"
       - "infra/local/**"
+      - "infra/supabase/**"
+      - "compose.yaml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "infra/docker/entrypoint.mjs"
+      - "next.config.ts"
+      - "package.json"
+      - "package-lock.json"
       - "scripts/docker-local-regression.test.cjs"
       - ".github/workflows/docker-local.yml"
   workflow_dispatch:
@@ -20,10 +36,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: panda-local-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   local-compose-config:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Static checks
@@ -32,6 +52,16 @@ jobs:
           node scripts/docker-local-regression.test.cjs
       - name: Prepare disposable configuration
         run: bash infra/local/init.sh
+      - name: Ensure repeat initialization cannot overwrite local data
+        shell: bash
+        run: |
+          before="$(sha256sum .env.docker .panda-local/supabase/.env .panda-local/secrets/supabase-secret-key)"
+          if bash infra/local/init.sh; then
+            echo "Repeated initialization must fail closed" >&2
+            exit 1
+          fi
+          after="$(sha256sum .env.docker .panda-local/supabase/.env .panda-local/secrets/supabase-secret-key)"
+          test "$before" = "$after"
       - name: Validate vendor file permissions and secret isolation
         shell: bash
         run: |
