@@ -53,7 +53,7 @@ assert.match(init, /Existing local state found; refusing to overwrite/);
 assert.match(init, /chmod 600/);
 assert.match(start, /flock -n 9/);
 assert.match(start, /Partial initialization detected/);
-assert.match(start, /secure_file "\\$ENV_FILE" 600/);
+assert.ok(start.includes('secure_file "$ENV_FILE" 600'));
 assert.match(start, /SCHEDULER_ENABLED/);
 assert.match(start, /COMPOSE_PROFILES/);
 assert.match(start, /--build --wait/);
