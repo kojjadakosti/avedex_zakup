@@ -7,6 +7,7 @@ on:
       - "infra/local/**"
       - "infra/migration/restore-platform-test.sh"
       - "infra/migration/test-restore-guards.sh"
+      - "infra/migration/disposable-restore-transaction-smoke.sh"
       - "infra/supabase/**"
       - "compose.yaml"
       - "Dockerfile"
@@ -25,6 +26,7 @@ on:
       - "infra/local/**"
       - "infra/migration/restore-platform-test.sh"
       - "infra/migration/test-restore-guards.sh"
+      - "infra/migration/disposable-restore-transaction-smoke.sh"
       - "infra/supabase/**"
       - "compose.yaml"
       - "Dockerfile"
@@ -57,7 +59,12 @@ jobs:
           bash -n infra/migration/restore-platform-test.sh
           bash -n infra/migration/test-restore-guards.sh
           sudo env GITHUB_ACTIONS=true bash infra/migration/test-restore-guards.sh
+          bash -n infra/migration/disposable-restore-transaction-smoke.sh
           node scripts/docker-local-regression.test.cjs
+      - name: Prove real PostgreSQL transaction rollback using synthetic data
+        shell: bash
+        timeout-minutes: 8
+        run: sudo env GITHUB_ACTIONS=true PANDA_CI_DISPOSABLE=yes bash infra/migration/disposable-restore-transaction-smoke.sh
       - name: Prepare disposable configuration
         run: bash infra/local/init.sh
       - name: Ensure repeat initialization cannot overwrite local data
