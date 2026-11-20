@@ -46,3 +46,6 @@ next-env.d.ts
 /.ci-secrets/
 /secrets/
 /backups/
+
+# Local-start concurrency lock (never commit runtime state).
+/.panda-local.lock

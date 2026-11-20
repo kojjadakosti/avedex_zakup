@@ -57,6 +57,7 @@ jobs:
       - name: Static checks
         run: |
           bash -n infra/local/init.sh
+          bash -n infra/local/start.sh
           bash -n infra/local/check-business-schema.sh
           node --check infra/local/pg-restore-bridge.mjs
           node --check infra/migration/validate-pgservice.mjs
@@ -81,6 +82,22 @@ jobs:
           fi
           after="$(sha256sum .env.docker .panda-local/supabase/.env .panda-local/secrets/supabase-secret-key)"
           test "$before" = "$after"
+      - name: Check safe repeat startup without changing keys
+        shell: bash
+        run: |
+          before="$(sha256sum .env.docker .panda-local/supabase/.env .panda-local/secrets/supabase-secret-key)"
+          bash infra/local/start.sh --check
+          if SCHEDULER_ENABLED=true bash infra/local/start.sh --check >/dev/null 2>&1; then
+            echo "External scheduler override must fail closed" >&2
+            exit 1
+          fi
+          if PANDA_BIND_ADDRESS=0.0.0.0 bash infra/local/start.sh --check >/dev/null 2>&1; then
+            echo "Public proxy override must fail closed" >&2
+            exit 1
+          fi
+          after="$(sha256sum .env.docker .panda-local/supabase/.env .panda-local/secrets/supabase-secret-key)"
+          test "$before" = "$after"
+          echo "PASS: repeated local startup check preserves credentials and blocks unsafe overrides"
       - name: Validate vendor file permissions and secret isolation
         shell: bash
         run: |
@@ -144,7 +161,7 @@ jobs:
             docker network rm panda_shared || true
           }
           trap cleanup EXIT
-          timeout 1500s docker compose -f compose.local.yaml --env-file .env.docker up -d --build --wait
+          timeout 1500s bash infra/local/start.sh
           curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/login >/dev/null
           # The official Supabase gateway rejects anonymous requests without
           # an API key. Prove the access check is enforced, then use the
