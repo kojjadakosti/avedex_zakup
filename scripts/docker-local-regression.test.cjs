@@ -15,7 +15,7 @@ assert.match(authOverlay, /panda-db-roles:/);
 assert.match(authOverlay, /service_completed_successfully/);
 assert.doesNotMatch(authOverlay, /pg_authid/);
 assert.match(compose, /panda-db-roles:/);
-assert.match(compose, /roles\\.sql:ro/);
+assert.match(compose, /roles\.sql:ro/);
 assert.match(compose, /psql -h db -U postgres/);
 assert.match(compose, /restart: "no"/);
 assert.match(authOverlay, /retries: 12/);
