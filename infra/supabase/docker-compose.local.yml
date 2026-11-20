@@ -1,0 +1,34 @@
+# A listening PostgreSQL server is not yet fully initialized.
+# Check role readiness without returning hashes or changing user data.
+services:
+  db:
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 &&
+          test "$$(psql -U postgres -h 127.0.0.1 -d postgres -Atqc
+          "SELECT count(*) FROM pg_authid WHERE rolname IN
+          ('authenticator','pgbouncer','supabase_auth_admin','supabase_functions_admin','supabase_storage_admin')
+          AND rolpassword IS NOT NULL" 2>/dev/null)" = 5
+      interval: 5s
+      timeout: 10s
+      start_period: 90s
+      retries: 12
+  auth:
+    healthcheck:
+      start_period: 60s
+      retries: 12
+
+  # Pooler is an optional component, but its first boot can require extra
+  # time for internal migrations; preserve upstream health check command.
+  supavisor:
+    # The official Supavisor entrypoint requires 100000 open files;
+    # set this at container creation rather than granting extra capabilities.
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    healthcheck:
+      start_period: 90s
+      retries: 12

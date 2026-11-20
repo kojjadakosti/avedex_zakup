@@ -27,7 +27,9 @@ const publicKey = config.SUPABASE_PUBLISHABLE_KEY;
 const serviceKey = config.SUPABASE_SECRET_KEY;
 assert.ok(publicKey?.startsWith("sb_publishable_"), "Missing generated public key");
 assert.ok(serviceKey?.startsWith("sb_secret_"), "Missing generated private key");
-const origin = "http://127.0.0.1:8000";
+const origin = process.env.PANDA_SMOKE_ORIGIN || "http://127.0.0.1:8000";
+assert.ok(["http://127.0.0.1:8000","http://127.0.0.1:8080"].includes(origin),
+  "Synthetic smoke may use only the isolated loopback gateway");
 
 async function request(path, {method="GET", body, token, key=publicKey, mime="application/json"}={}) {
   const headers = { apikey: key };

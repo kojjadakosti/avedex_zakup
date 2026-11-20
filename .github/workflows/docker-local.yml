@@ -1,0 +1,231 @@
+name: Panda local Docker configuration
+
+on:
+  pull_request:
+    paths:
+      - "compose.local.yaml"
+      - "infra/local/**"
+      - "infra/migration/restore-platform-test.sh"
+      - "infra/migration/test-restore-guards.sh"
+      - "infra/migration/disposable-restore-transaction-smoke.sh"
+      - "infra/migration/validate-pgservice.mjs"
+      - "infra/supabase/**"
+      - "compose.yaml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "infra/docker/entrypoint.mjs"
+      - "next.config.ts"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/docker-local-regression.test.cjs"
+      - ".github/workflows/docker-local.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "compose.local.yaml"
+      - "infra/local/**"
+      - "infra/migration/restore-platform-test.sh"
+      - "infra/migration/test-restore-guards.sh"
+      - "infra/migration/disposable-restore-transaction-smoke.sh"
+      - "infra/migration/validate-pgservice.mjs"
+      - "infra/supabase/**"
+      - "compose.yaml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "infra/docker/entrypoint.mjs"
+      - "next.config.ts"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/docker-local-regression.test.cjs"
+      - ".github/workflows/docker-local.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: panda-local-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-compose-config:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static checks
+        run: |
+          bash -n infra/local/init.sh
+          bash -n infra/local/start.sh
+          bash -n infra/local/check-business-schema.sh
+          node --check infra/local/pg-restore-bridge.mjs
+          node --check infra/migration/validate-pgservice.mjs
+          bash -n infra/migration/restore-platform-test.sh
+          bash -n infra/migration/test-restore-guards.sh
+          sudo env GITHUB_ACTIONS=true bash infra/migration/test-restore-guards.sh
+          bash -n infra/migration/disposable-restore-transaction-smoke.sh
+          node scripts/docker-local-regression.test.cjs
+      - name: Prove real PostgreSQL transaction rollback using synthetic data
+        shell: bash
+        timeout-minutes: 8
+        run: sudo env GITHUB_ACTIONS=true PANDA_CI_DISPOSABLE=yes bash infra/migration/disposable-restore-transaction-smoke.sh
+      - name: Prepare disposable configuration
+        run: bash infra/local/init.sh
+      - name: Ensure repeat initialization cannot overwrite local data
+        shell: bash
+        run: |
+          before="$(sha256sum .env.docker .panda-local/supabase/.env .panda-local/secrets/supabase-secret-key)"
+          if bash infra/local/init.sh; then
+            echo "Repeated initialization must fail closed" >&2
+            exit 1
+          fi
+          after="$(sha256sum .env.docker .panda-local/supabase/.env .panda-local/secrets/supabase-secret-key)"
+          test "$before" = "$after"
+      - name: Check safe repeat startup without changing keys
+        shell: bash
+        run: |
+          before="$(sha256sum .env.docker .panda-local/supabase/.env .panda-local/secrets/supabase-secret-key)"
+          bash infra/local/start.sh --check
+          if SCHEDULER_ENABLED=true bash infra/local/start.sh --check >/dev/null 2>&1; then
+            echo "External scheduler override must fail closed" >&2
+            exit 1
+          fi
+          if PANDA_BIND_ADDRESS=0.0.0.0 bash infra/local/start.sh --check >/dev/null 2>&1; then
+            echo "Public proxy override must fail closed" >&2
+            exit 1
+          fi
+          after="$(sha256sum .env.docker .panda-local/supabase/.env .panda-local/secrets/supabase-secret-key)"
+          test "$before" = "$after"
+          echo "PASS: repeated local startup check preserves credentials and blocks unsafe overrides"
+      - name: Validate vendor file permissions and secret isolation
+        shell: bash
+        run: |
+          test "$(stat -c '%a' .panda-local/supabase/.env)" = 600
+          test "$(stat -c '%a' .panda-local/supabase/volumes/db/roles.sql)" = 644
+          test "$(stat -c '%a' .panda-local/supabase/volumes/db/webhooks.sql)" = 644
+      - name: Validate complete Compose model
+        run: |
+          docker compose -f compose.local.yaml --env-file .env.docker config --quiet
+          docker compose -f compose.local.yaml --env-file .env.docker config --format json > "$RUNNER_TEMP/panda-local-compose.json"
+          node - "$RUNNER_TEMP/panda-local-compose.json" <<'NODE'
+          const fs = require("fs");
+          const model = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          for (const name of ["panda-web", "panda-proxy", "api-gw", "auth", "rest", "db", "storage"])
+            if (!model.services[name]) throw new Error("Missing service: " + name);
+          if (model.services["panda-scheduler"]) throw new Error("Scheduler must remain disabled");
+          if (model.services["panda-db-tunnel"])
+            throw new Error("Restore tunnel must be absent from default Compose");
+          const dbCheck = model.services.db.healthcheck?.test?.join(" ") ?? "";
+          const poolerNofile = model.services.supavisor?.ulimits?.nofile;
+          if (Number(poolerNofile?.soft) !== 100000 || Number(poolerNofile?.hard) !== 100000)
+            throw new Error("Pooler must start with required nofile limit");
+          if (!dbCheck.includes("pg_authid") || model.services["panda-db-roles"])
+            throw new Error("Database readiness must wait for upstream role init");
+          // Check effective interpolation without printing any real credentials.
+          const password = model.services.db.environment.POSTGRES_PASSWORD;
+          const authDb = new URL(model.services.auth.environment.GOTRUE_DB_DATABASE_URL);
+          const restDb = new URL(model.services.rest.environment.PGRST_DB_URI);
+          if (!password || password.length < 24) throw new Error("Missing effective PostgreSQL password");
+          if (authDb.password !== password || restDb.password !== password)
+            throw new Error("Supabase services disagree on PostgreSQL credentials");
+          for (const [name, service] of Object.entries(model.services)) {
+            for (const port of service.ports ?? []) {
+              if (port.host_ip !== "127.0.0.1")
+                throw new Error("Public port in " + name);
+            }
+          }
+          console.log("PASS: complete local Compose with loopback-only exposure");
+          NODE
+          docker compose -f compose.local.yaml --env-file .env.docker --profile restore \
+            config --format json > "$RUNNER_TEMP/panda-local-restore-compose.json"
+          node - "$RUNNER_TEMP/panda-local-restore-compose.json" <<'NODE'
+          const fs = require("fs");
+          const m = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          const tunnel = m.services["panda-db-tunnel"];
+          if (!tunnel?.profiles?.includes("restore") ||
+              tunnel.ports?.length !== 1 ||
+              tunnel.ports[0].host_ip !== "127.0.0.1" ||
+              String(tunnel.ports[0].published) !== "15432")
+            throw new Error("Restore tunnel must be opt-in and loopback-only");
+          console.log("PASS: restore-only profile exposes direct PostgreSQL on loopback");
+          NODE
+      - name: Boot actual local stack (disposable test data only)
+        shell: bash
+        timeout-minutes: 35
+        run: |
+          cleanup() {
+            docker compose -f compose.local.yaml --env-file .env.docker ps -a || true
+            docker compose -f compose.local.yaml --env-file .env.docker logs --tail=100 panda-web panda-proxy auth rest storage realtime supavisor api-gw db || true
+            docker compose -f compose.local.yaml --env-file .env.docker --profile restore down --volumes --remove-orphans || true
+            docker network rm panda_shared || true
+          }
+          trap cleanup EXIT
+          timeout 1500s bash infra/local/start.sh
+          curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/login >/dev/null
+          # The official Supabase gateway rejects anonymous requests without
+          # an API key. Prove the access check is enforced, then use the
+          # generated public test key. Never print secret or service-role keys.
+          status="$(curl --silent --show-error --max-time 15 -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:8080/auth/v1/health)"
+          test "$status" = 401
+          publishable="$(sed -n 's/^NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=//p' .env.docker | tail -1)"
+          test -n "$publishable"
+          curl --fail --silent --show-error --max-time 15 \
+            -H "apikey: $publishable" \
+            http://127.0.0.1:8080/auth/v1/health >/dev/null
+          echo "PASS: local web, proxy and authenticated Supabase gateway respond on the same entrypoint"
+
+          # The privileged restore port is absent in normal startup. Start an
+          # explicit, temporary localhost-only tunnel and check actual DB route.
+          if timeout 2 bash -c 'echo > /dev/tcp/127.0.0.1/15432' 2>/dev/null; then
+            echo "Restore port must be closed without the restore profile" >&2
+            exit 1
+          fi
+          docker compose -f compose.local.yaml --env-file .env.docker --profile restore \
+            up -d --no-deps panda-db-tunnel
+          bridge_ready=no
+          for attempt in $(seq 1 15); do
+            if docker run --rm --network host --entrypoint pg_isready postgres:17-alpine \
+              -h 127.0.0.1 -p 15432 -U postgres -d postgres >/dev/null 2>&1; then
+              bridge_ready=yes
+              break
+            fi
+            sleep 2
+          done
+          test "$bridge_ready" = yes || { echo "Restore bridge cannot reach PostgreSQL" >&2; exit 1; }
+          docker compose -f compose.local.yaml --env-file .env.docker --profile restore \
+            stop panda-db-tunnel
+          docker compose -f compose.local.yaml --env-file .env.docker --profile restore \
+            rm -f panda-db-tunnel
+          echo "PASS: direct PostgreSQL restore tunnel is opt-in, local, and removable"
+
+          # An empty self-hosted Supabase is infrastructure, not an installed
+          # application. Fail closed instead of pretending delta SQL is a baseline.
+          set +e
+          bash infra/local/check-business-schema.sh > "$RUNNER_TEMP/panda-schema-gate.txt" 2>&1
+          schema_status=$?
+          set -e
+          if [[ "$schema_status" -ne 78 ]] ||
+             ! grep -q '^BLOCKED: Business schema is absent' "$RUNNER_TEMP/panda-schema-gate.txt"; then
+            echo "Fresh local database must fail the business-schema gate" >&2
+            exit 1
+          fi
+          echo "PASS: fresh database is not mistaken for restored business schema"
+
+          # Synthetic Auth user + private Storage photo exercise the same
+          # public reverse-proxy routes used by browsers, including RLS/key gates.
+          fixture="$RUNNER_TEMP/panda-local-persistence.json"
+          PANDA_SMOKE_ORIGIN=http://127.0.0.1:8080 \
+            node infra/migration/supabase-stack-smoke.mjs .panda-local/supabase/.env "$fixture"
+          test "$(stat -c '%a' "$fixture")" = 600
+
+          # Restart WITHOUT down -v. Verify Auth user and private object bytes
+          # survive across the combined Compose stack, not just DB-only tests.
+          docker compose -f compose.local.yaml --env-file .env.docker stop
+          timeout 600s docker compose -f compose.local.yaml --env-file .env.docker up -d --wait
+          PANDA_SMOKE_ORIGIN=http://127.0.0.1:8080 \
+            node infra/migration/supabase-persistence-smoke.mjs .panda-local/supabase/.env "$fixture"
+          curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/login >/dev/null
+          rm -f "$fixture"
+          echo "PASS: local Compose restart retains Auth and private Storage data, web remains healthy"

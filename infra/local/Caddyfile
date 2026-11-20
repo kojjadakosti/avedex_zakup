@@ -1,0 +1,10 @@
+:8080 {
+  # The admin dashboard (/) on the Supabase gateway is not published.
+  @supabase path /auth/v1 /auth/v1/* /rest/v1 /rest/v1/* /storage/v1 /storage/v1/* /realtime/v1 /realtime/v1/* /functions/v1 /functions/v1/*
+  handle @supabase {
+    reverse_proxy supabase-gateway:8000
+  }
+  handle {
+    reverse_proxy panda-web:3000
+  }
+}
