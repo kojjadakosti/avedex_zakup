@@ -45,7 +45,7 @@ if [[ "$*" == *"--single-transaction"* ]]; then
   fi
   touch "$PANDA_TEST_RESTORED"
 else
-  printf '17|0|0|0|0|0\n'
+  printf '17|0|0|0|0\n'
 fi
 MOCK
 chmod 700 "$temp/bin/psql"
