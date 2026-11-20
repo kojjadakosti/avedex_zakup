@@ -16,6 +16,10 @@ services:
       start_period: 90s
       retries: 12
   auth:
+    # Auth v2.198.0 applies the official migrations required by the cloud
+    # dump: one_time_tokens.link_token_hash and saml_providers.dedicated_scope.
+    # Never patch system Auth tables by hand or edit generated vendor Compose.
+    image: supabase/gotrue:v2.198.0
     healthcheck:
       start_period: 60s
       retries: 12
