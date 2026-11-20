@@ -42,6 +42,13 @@ jobs:
           for (const name of ["panda-web", "panda-proxy", "api-gw", "auth", "rest", "db", "storage"])
             if (!model.services[name]) throw new Error("Missing service: " + name);
           if (model.services["panda-scheduler"]) throw new Error("Scheduler must remain disabled");
+          // Check effective interpolation without printing any real credentials.
+          const password = model.services.db.environment.POSTGRES_PASSWORD;
+          const authDb = new URL(model.services.auth.environment.GOTRUE_DB_DATABASE_URL);
+          const restDb = new URL(model.services.rest.environment.PGRST_DB_URI);
+          if (!password || password.length < 24) throw new Error("Missing effective PostgreSQL password");
+          if (authDb.password !== password || restDb.password !== password)
+            throw new Error("Supabase services disagree on PostgreSQL credentials");
           for (const [name, service] of Object.entries(model.services)) {
             for (const port of service.ports ?? []) {
               if (port.host_ip !== "127.0.0.1")
