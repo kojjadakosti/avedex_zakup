@@ -28,8 +28,8 @@ services:
       - sh
       - -ec
       - |
-        : "${POSTGRES_PASSWORD:?Missing local Postgres password}"
-        export PGPASSWORD="$POSTGRES_PASSWORD"
+        : "$${POSTGRES_PASSWORD:?Missing local Postgres password}"
+        export PGPASSWORD="$$POSTGRES_PASSWORD"
         psql -h db -U postgres -d postgres -v ON_ERROR_STOP=1 \
           -f /etc/panda/roles.sql >/dev/null
     user: "70:70"
