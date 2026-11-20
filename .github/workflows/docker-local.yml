@@ -49,6 +49,9 @@ jobs:
             if (!model.services[name]) throw new Error("Missing service: " + name);
           if (model.services["panda-scheduler"]) throw new Error("Scheduler must remain disabled");
           const dbCheck = model.services.db.healthcheck?.test?.join(" ") ?? "";
+          const poolerNofile = model.services.supavisor?.ulimits?.nofile;
+          if (Number(poolerNofile?.soft) !== 100000 || Number(poolerNofile?.hard) !== 100000)
+            throw new Error("Pooler must start with required nofile limit");
           if (!dbCheck.includes("pg_authid") || model.services["panda-db-roles"])
             throw new Error("Database readiness must wait for upstream role init");
           // Check effective interpolation without printing any real credentials.

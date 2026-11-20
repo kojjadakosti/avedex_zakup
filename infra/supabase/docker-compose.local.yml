@@ -23,6 +23,12 @@ services:
   # Pooler is an optional component, but its first boot can require extra
   # time for internal migrations; preserve upstream health check command.
   supavisor:
+    # The official Supavisor entrypoint requires 100000 open files;
+    # set this at container creation rather than granting extra capabilities.
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
     healthcheck:
       start_period: 90s
       retries: 12
