@@ -13,8 +13,16 @@ printf 'SELECT 1;\n' > "$temp/dumps/roles.sql"
 printf 'CREATE TABLE public.example(id integer);\n' > "$temp/dumps/schema.sql"
 printf 'COPY auth.users (id) FROM stdin;\n1\n\\.\n' > "$temp/dumps/data.sql"
 chmod 600 "$temp/dumps/"{roles,schema,data}.sql
-printf '[panda_test]\nhost=127.0.0.1\n' > "$temp/pgservice.conf"
-chmod 600 "$temp/pgservice.conf"
+cat > "$temp/pgservice.conf" <<SERVICE
+[panda_test]
+host=127.0.0.1
+port=5432
+dbname=postgres
+user=postgres
+passfile=$temp/pgpass
+SERVICE
+printf '127.0.0.1:5432:postgres:postgres:synthetic\n' > "$temp/pgpass"
+chmod 600 "$temp/pgservice.conf" "$temp/pgpass"
 export PGSERVICEFILE="$temp/pgservice.conf"
 export PANDA_TEST_DUMP_DIR="$temp/dumps"
 export PANDA_TARGET_PGSERVICE=panda_test
@@ -37,7 +45,7 @@ if [[ "$*" == *"--single-transaction"* ]]; then
   fi
   touch "$PANDA_TEST_RESTORED"
 else
-  printf '17|127.0.0.1|0|0|0|0|0\n'
+  printf '17|0|0|0|0|0\n'
 fi
 MOCK
 chmod 700 "$temp/bin/psql"
@@ -60,6 +68,9 @@ assert_blocked() {
 unset PANDA_TARGET_DISPOSABLE
 assert_blocked
 export PANDA_TARGET_DISPOSABLE=CONFIRMED_EMPTY_TEST_DATABASE
+sed -i 's/host=127.0.0.1/host=203.0.113.5/' "$temp/pgservice.conf"
+assert_blocked
+sed -i 's/host=203.0.113.5/host=127.0.0.1/' "$temp/pgservice.conf"
 chmod 644 "$temp/dumps/schema.sql"
 assert_blocked
 chmod 600 "$temp/dumps/schema.sql"

@@ -37,19 +37,22 @@ for name in roles schema data; do
   fi
 done
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+node "$repo_dir/infra/migration/validate-pgservice.mjs" \
+  "$PGSERVICEFILE" "$PANDA_TARGET_PGSERVICE" >/dev/null ||
+  die "Privileged PostgreSQL connection is not safely restricted to localhost"
 node "$repo_dir/scripts/storage-dump-preflight.mjs" "$PANDA_TEST_DUMP_DIR/data.sql" >/dev/null ||
   die "Unsafe data dump (Auth/Storage/Vault/cron guard failed)"
 
 conn="service=$PANDA_TARGET_PGSERVICE"
 psqltest() { psql -X -w -q -At -v ON_ERROR_STOP=1 -d "$conn" "$@"; }
 before="$(psqltest -c "
-SELECT current_setting('server_version_num')::integer/10000, inet_server_addr()::text,
+SELECT current_setting('server_version_num')::integer/10000,
  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid
   WHERE n.nspname='public' AND c.relkind IN('r','p')),
  (SELECT count(*) FROM auth.users),(SELECT count(*) FROM storage.objects),
  (SELECT count(*) FROM vault.secrets),(SELECT count(*) FROM cron.job);")"
-IFS='|' read -r major host tables users objects secrets cron <<< "$before"
-[[ "$major" == "17" && "$host" == "127.0.0.1" &&
+IFS='|' read -r major tables users objects secrets cron <<< "$before"
+[[ "$major" == "17" &&
   "$tables" == "0" && "$users" == "0" && "$objects" == "0" &&
   "$secrets" == "0" && "$cron" == "0" ]] ||
   die "Refusing to modify nonempty/non-local/non-PG17 database"
@@ -62,7 +65,6 @@ SELECT pg_advisory_xact_lock(7180226, 1);
 DO $panda_preflight$
 BEGIN
   IF current_setting('server_version_num')::integer/10000 <> 17
-    OR inet_server_addr()::text IS DISTINCT FROM '127.0.0.1'
     OR current_database() <> 'postgres'
     OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                WHERE n.nspname='public' AND c.relkind IN ('r','p'))

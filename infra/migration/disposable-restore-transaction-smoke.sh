@@ -98,12 +98,24 @@ state="$(docker exec "$db" psql -U postgres -d postgres -Atq -c "$query")"
 [[ "$state" == "0|0|0" ]] || {
   echo "A rejected SQL import left partially committed data" >&2; exit 1;
 }
+private_failure_log="$(find "$tmp/dumps" -maxdepth 1 -type f -name '.restore-result.*' -print -quit)"
+[[ -n "$private_failure_log" ]] ||
+  { echo "Failed restore did not retain a private SQL error log" >&2; exit 1; }
+if ! grep -q "Protected restore postflight mismatch" "$private_failure_log"; then
+  echo "First rejected import did not reach its transactional postflight" >&2
+  cat "$tmp/err" >&2
+  exit 1
+fi
 echo "PASS: bad postflight rolled back roles, schema and synthetic user"
 
 # The first SQL failure log is private. Remove it before testing success.
 find "$tmp/dumps" -maxdepth 1 -type f -name '.restore-result.*' -delete
 export PANDA_EXPECT_TABLES=1
-bash "$root/infra/migration/restore-platform-test.sh" > "$tmp/out" 2>"$tmp/err"
+if ! bash "$root/infra/migration/restore-platform-test.sh" > "$tmp/out" 2>"$tmp/err"; then
+  echo "Synthetic approved restore failed" >&2
+  cat "$tmp/err" >&2
+  exit 1
+fi
 state="$(docker exec "$db" psql -U postgres -d postgres -Atq -c "$query")"
 [[ "$state" == "1|1|1" ]] || {
   echo "Accepted SQL import did not contain all synthetic objects" >&2; exit 1;
