@@ -50,3 +50,17 @@ jobs:
           }
           console.log("PASS: complete local Compose with loopback-only exposure");
           NODE
+      - name: Boot actual local stack (disposable test data only)
+        shell: bash
+        timeout-minutes: 35
+        run: |
+          cleanup() {
+            docker compose -f compose.local.yaml --env-file .env.docker logs --tail=80 panda-web panda-proxy || true
+            docker compose -f compose.local.yaml --env-file .env.docker down --volumes --remove-orphans || true
+            docker network rm panda_shared || true
+          }
+          trap cleanup EXIT
+          timeout 1500s docker compose -f compose.local.yaml --env-file .env.docker up -d --build --wait
+          curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/login >/dev/null
+          curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8080/auth/v1/health >/dev/null
+          echo "PASS: local web, proxy and Supabase Auth respond on the same entrypoint"
