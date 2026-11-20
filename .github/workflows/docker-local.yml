@@ -72,7 +72,7 @@ jobs:
         run: |
           cleanup() {
             docker compose -f compose.local.yaml --env-file .env.docker ps -a || true
-            docker compose -f compose.local.yaml --env-file .env.docker logs --tail=100 panda-web panda-proxy auth api-gw db || true
+            docker compose -f compose.local.yaml --env-file .env.docker logs --tail=100 panda-web panda-proxy auth rest storage realtime supavisor api-gw db || true
             docker compose -f compose.local.yaml --env-file .env.docker down --volumes --remove-orphans || true
             docker network rm panda_shared || true
           }

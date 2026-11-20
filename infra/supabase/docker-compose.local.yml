@@ -19,3 +19,10 @@ services:
     healthcheck:
       start_period: 60s
       retries: 12
+
+  # Pooler is an optional component, but its first boot can require extra
+  # time for internal migrations; preserve upstream health check command.
+  supavisor:
+    healthcheck:
+      start_period: 90s
+      retries: 12
