@@ -1,6 +1,22 @@
-# Local cold-start grace period for GoTrue, whose first boot migrates Auth schema.
-# Keep upstream's actual readiness probe; never bypass it.
+# A database accepting TCP connections is not yet fully initialized.
+# Wait until upstream init-scripts/99-roles.sql has assigned passwords to every
+# Supabase service role. Never log, read or expose their password hashes.
 services:
+  db:
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1 &&
+          test "$$(psql -U postgres -h 127.0.0.1 -d postgres -Atqc
+          "SELECT count(*) FROM pg_authid WHERE rolname IN
+          ('authenticator','pgbouncer','supabase_auth_admin','supabase_functions_admin','supabase_storage_admin')
+          AND rolpassword IS NOT NULL" 2>/dev/null)" = 5
+      interval: 5s
+      timeout: 10s
+      start_period: 90s
+      retries: 12
+
   auth:
     healthcheck:
       start_period: 60s
