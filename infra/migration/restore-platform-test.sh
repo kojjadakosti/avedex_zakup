@@ -50,12 +50,31 @@ SELECT current_setting('server_version_num')::integer/10000,
  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid
   WHERE n.nspname='public' AND c.relkind IN('r','p')),
  (SELECT count(*) FROM auth.users),(SELECT count(*) FROM storage.objects),
- (SELECT count(*) FROM vault.secrets),(SELECT count(*) FROM cron.job);")"
-IFS='|' read -r major tables users objects secrets cron <<< "$before"
+ (SELECT count(*) FROM vault.secrets);")"
+IFS='|' read -r major tables users objects secrets <<< "$before"
 [[ "$major" == "17" &&
   "$tables" == "0" && "$users" == "0" && "$objects" == "0" &&
-  "$secrets" == "0" && "$cron" == "0" ]] ||
+  "$secrets" == "0" ]] ||
   die "Refusing to modify nonempty/non-local/non-PG17 database"
+# pg_cron is optional in a fresh self-hosted installation. If its job
+# relation exists, insist on zero rows; if absent, there are no jobs to run.
+# Use dynamic SQL: a static FROM cron.job would fail at parse time.
+if ! psqltest -c "$(cat <<'SQL'
+DO $panda_cron_guard$
+DECLARE has_jobs boolean;
+BEGIN
+  IF to_regclass('cron.job') IS NOT NULL THEN
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM cron.job)' INTO has_jobs;
+    IF has_jobs THEN
+      RAISE EXCEPTION 'Refusing nonempty local cron jobs';
+    END IF;
+  END IF;
+END
+$panda_cron_guard$;
+SQL
+)" >/dev/null; then
+  die "Refusing database with existing cron jobs"
+fi
 echo "CHECK: new private localhost PostgreSQL 17 target is empty"
 
 # Concurrent runs of this script serialize via a transaction-scoped lock.
@@ -63,6 +82,7 @@ echo "CHECK: new private localhost PostgreSQL 17 target is empty"
 preflight_sql="$(cat <<'SQL'
 SELECT pg_advisory_xact_lock(7180226, 1);
 DO $panda_preflight$
+DECLARE cron_has_jobs boolean;
 BEGIN
   IF current_setting('server_version_num')::integer/10000 <> 17
     OR current_database() <> 'postgres'
@@ -70,9 +90,14 @@ BEGIN
                WHERE n.nspname='public' AND c.relkind IN ('r','p'))
     OR EXISTS (SELECT 1 FROM auth.users)
     OR EXISTS (SELECT 1 FROM storage.objects)
-    OR EXISTS (SELECT 1 FROM vault.secrets)
-    OR EXISTS (SELECT 1 FROM cron.job) THEN
+    OR EXISTS (SELECT 1 FROM vault.secrets) THEN
     RAISE EXCEPTION 'Protected restore preflight failed within transaction';
+  END IF;
+  IF to_regclass('cron.job') IS NOT NULL THEN
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM cron.job)' INTO cron_has_jobs;
+    IF cron_has_jobs THEN
+      RAISE EXCEPTION 'Protected restore preflight failed within transaction';
+    END IF;
   END IF;
 END
 $panda_preflight$;
@@ -87,14 +112,16 @@ DECLARE
   actual_tables bigint;
   actual_users bigint;
   actual_objects bigint;
-  actual_cron bigint;
+  actual_cron bigint := 0;
   actual_vault bigint;
 BEGIN
   SELECT count(*) INTO actual_tables FROM pg_class c JOIN pg_namespace n
     ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p');
   SELECT count(*) INTO actual_users FROM auth.users;
   SELECT count(*) INTO actual_objects FROM storage.objects;
-  SELECT count(*) INTO actual_cron FROM cron.job;
+  IF to_regclass('cron.job') IS NOT NULL THEN
+    EXECUTE 'SELECT count(*) FROM cron.job' INTO actual_cron;
+  END IF;
   SELECT count(*) INTO actual_vault FROM vault.secrets;
   IF actual_tables <> ${PANDA_EXPECT_TABLES}
      OR actual_users <> ${PANDA_EXPECT_AUTH_USERS}
